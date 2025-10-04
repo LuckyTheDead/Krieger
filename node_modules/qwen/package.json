@@ -1,0 +1,11 @@
+{
+  "name": "qwen",
+  "version": "0.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "kyan0045",
+  "license": "MIT",
+  "description": ""
+}

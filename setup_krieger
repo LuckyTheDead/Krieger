@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+import os
+import json
+from annoy import AnnoyIndex
+
+# --- Configuration ---
+VECTOR_DIM = 512  # adjust to match your embeddings
+INDEX_FILE = "krieger_index.ann"
+META_FILE = "meta.json"
+SAMPLE_PAGES_DIR = "sample_pages"
+
+# --- Create sample pages ---
+os.makedirs(SAMPLE_PAGES_DIR, exist_ok=True)
+with open(os.path.join(SAMPLE_PAGES_DIR, "example.html"), "w") as f:
+    f.write("<html><body><h1>Krieger Lab Sample Page</h1></body></html>")
+
+# --- Create metadata for pages ---
+metadata = [{"filename": "example.html", "text": "Krieger Lab Sample Page"}]
+with open(META_FILE, "w") as f:
+    json.dump(metadata, f, indent=2)
+
+# --- Build Annoy index ---
+print("Creating Annoy index...")
+index = AnnoyIndex(VECTOR_DIM, 'angular')  # or 'euclidean'
+
+# For demo purposes, create random vectors
+import random
+for i in range(len(metadata)):
+    vec = [random.random() for _ in range(VECTOR_DIM)]
+    index.add_item(i, vec)
+
+index.build(10)  # 10 trees is fine for small demo
+index.save(INDEX_FILE)
+
+print(f"Setup complete! Index saved to {INDEX_FILE} and metadata to {META_FILE}.")
