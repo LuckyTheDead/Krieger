@@ -2,14 +2,20 @@
 import readline from 'readline';
 import { exec } from 'child_process';
 import OpenAI from 'openai';
+import { Mistral } from '@mistralai/mistralai';
 import chalk from 'chalk'; // For rich formatting
 
 // --- Clients ---
 const openaiOR = new OpenAI({ apiKey: process.env.OPENAI_OR_API_KEY, baseURL: 'https://openrouter.ai/api/v1' });
 const openaiHF = new OpenAI({ apiKey: process.env.OPENAI_HF_API_KEY, baseURL: 'https://router.huggingface.co/v1' });
+const mistralClient = new Mistral({
+  apiKey: process.env.GITHUB_TOKEN,
+  serverURL: 'https://models.github.ai/inference',
+});
 
 const OR_MODEL = 'moonshotai/kimi-k2:free';
 const HF_MODEL = 'Qwen/Qwen3-Coder-480B-A35B-Instruct';
+const MISTRAL_MODEL = 'mistral-ai/Mistral-Large-2411';
 
 const SYSTEM_PROMPT = `
 You are Dr. Algernop Krieger from Archer. Eccentric, clever, and know Linux commands.
@@ -46,9 +52,26 @@ async function queryHuggingFace(history) {
   }
 }
 
+async function queryMistral(history) {
+  try {
+    const response = await mistralClient.chat.complete({
+      model: MISTRAL_MODEL,
+      messages: history,
+      temperature: 1.0,
+      max_tokens: 1000,
+      top_p: 1.0,
+    });
+    return response.choices[0].message.content;
+  } catch (err) {
+    console.error(chalk.red(`Error querying Mistral: ${err.message}`));
+    return null;
+  }
+}
+
 async function getKriegerResponse(history) {
   let reply = await queryOpenRouter(history);
   if (!reply) reply = await queryHuggingFace(history);
+  if (!reply) reply = await queryMistral(history); // New fallback
   return reply;
 }
 
