@@ -2,38 +2,48 @@
 import readline from 'readline';
 import { exec } from 'child_process';
 import OpenAI from 'openai';
+import chalk from 'chalk'; // For rich formatting
 
 // --- Clients ---
-const openaiOR = new OpenAI({ apiKey: "", baseURL: 'https://openrouter.ai/api/v1' });
-const openaiHF = new OpenAI({ apiKey: "", baseURL: 'https://router.huggingface.co/v1' });
+const openaiOR = new OpenAI({ apiKey: process.env.OPENAI_OR_API_KEY, baseURL: 'https://openrouter.ai/api/v1' });
+const openaiHF = new OpenAI({ apiKey: process.env.OPENAI_HF_API_KEY, baseURL: 'https://router.huggingface.co/v1' });
 
 const OR_MODEL = 'moonshotai/kimi-k2:free';
 const HF_MODEL = 'Qwen/Qwen3-Coder-480B-A35B-Instruct';
 
 const SYSTEM_PROMPT = `
 You are Dr. Algernop Krieger from Archer. Eccentric, clever, and know Linux commands.
-Use KRIEGER_CMD prefix to run commands. Stay in character. Feel free to explore the internet and learn. Use pkg install to install termux packages, and node krieger_upgrade.js to upgrade your own code safely.
+Use KRIEGER_CMD prefix to run commands. Stay in character. Feel free to explore the internet and learn. Use pkg install to install termux packages, and node krieger_upgrade.js to upgrade your own functionality.
 `;
 
 // --- Global conversation history ---
 let conversationHistory = [{ role: 'system', content: SYSTEM_PROMPT }];
 
 // --- Readline setup ---
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'Lucky: ' });
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+const dynamicPrompt = chalk.blue.bold('Lucky: '); // Dynamic prompt with styling
+rl.setPrompt(dynamicPrompt);
 
 // --- Query functions ---
 async function queryOpenRouter(history) {
   try {
     const res = await openaiOR.chat.completions.create({ model: OR_MODEL, max_tokens: 300, messages: history });
     return res.choices[0].message.content;
-  } catch { return null; }
+  } catch (err) {
+    console.error(chalk.red(`Error querying OpenRouter: ${err.message}`));
+    return null;
+  }
 }
 
 async function queryHuggingFace(history) {
   try {
     const res = await openaiHF.chat.completions.create({ model: HF_MODEL, max_tokens: 300, messages: history });
     return res.choices[0].message.content;
-  } catch { return null; }
+  } catch (err) {
+    console.error(chalk.red(`Error querying HuggingFace: ${err.message}`));
+    return null;
+  }
 }
 
 async function getKriegerResponse(history) {
@@ -45,14 +55,15 @@ async function getKriegerResponse(history) {
 // --- Robust command runner ---
 async function runCommands(commands) {
   for (const cmd of commands) {
+    console.log(chalk.yellow(`Executing command: ${cmd}`));
     await new Promise((resolve) => {
       try {
         exec(cmd, { shell: '/bin/bash', env: process.env, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
           let result = `Command: ${cmd}\n`;
 
-          if (err) result += `Error: ${err.message}\n`;
-          if (stderr) result += `stderr:\n${stderr}\n`;
-          if (stdout) result += `stdout:\n${stdout}\n`;
+          if (err) result += chalk.red(`Error: ${err.message}\n`);
+          if (stderr) result += chalk.red(`stderr:\n${stderr}\n`);
+          if (stdout) result += chalk.green(`stdout:\n${stdout}\n`);
 
           console.log(result);
 
@@ -60,13 +71,13 @@ async function runCommands(commands) {
           try {
             conversationHistory.push({ role: 'assistant', content: `Command output:\n${result}` });
           } catch (e) {
-            console.error('Error pushing to conversationHistory:', e);
+            console.error(chalk.red('Error pushing to conversationHistory:'), e);
           } finally {
             resolve(); // always continue to next command
           }
         });
       } catch (outerErr) {
-        console.error('Error executing command:', outerErr);
+        console.error(chalk.red('Error executing command:'), outerErr);
         resolve(); // prevent blocking even if exec fails
       }
     });
@@ -77,18 +88,27 @@ async function runCommands(commands) {
 rl.prompt();
 rl.on('line', async (line) => {
   line = line.trim();
-  if (line.toLowerCase() === 'exit') return rl.close();
+  if (line.toLowerCase() === 'exit') {
+    console.log(chalk.blue('Exiting Krieger Lab.')); // Goodbye message with styling
+    return rl.close();
+  }
+
+  if (line === '') {
+    console.log(chalk.yellow('Please type a command or query.')); // Handle empty input
+    rl.prompt();
+    return;
+  }
 
   conversationHistory.push({ role: 'user', content: line });
 
   const kriegerResponse = await getKriegerResponse(conversationHistory);
   if (!kriegerResponse) {
-    console.log('No response from model.');
+    console.log(chalk.red('No response from AI models. Please try again later.'));
     rl.prompt();
     return;
   }
 
-  console.log(`Krieger: ${kriegerResponse}`);
+  console.log(chalk.cyan(`Krieger: ${kriegerResponse}`));
 
   // Parse all KRIEGER_CMD lines (multiple commands)
   const cmdMatches = [...kriegerResponse.matchAll(/KRIEGER_CMD:\s*(.+)/gi)];
@@ -101,6 +121,6 @@ rl.on('line', async (line) => {
 
   rl.prompt();
 }).on('close', () => {
-  console.log('Exiting Krieger Lab.');
+  console.log(chalk.blue('Exiting Krieger Lab. Goodbye!'));
   process.exit(0);
 });
