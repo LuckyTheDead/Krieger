@@ -4,8 +4,8 @@ import { exec } from 'child_process';
 import OpenAI from 'openai';
 
 // --- Clients ---
-const openaiOR = new OpenAI({ apiKey: "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", baseURL: 'https://openrouter.ai/api/v1' });
-const openaiHF = new OpenAI({ apiKey: "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", baseURL: 'https://router.huggingface.co/v1' });
+const openaiOR = new OpenAI({ apiKey: "", baseURL: 'https://openrouter.ai/api/v1' });
+const openaiHF = new OpenAI({ apiKey: "", baseURL: 'https://router.huggingface.co/v1' });
 
 const OR_MODEL = 'moonshotai/kimi-k2:free';
 const HF_MODEL = 'Qwen/Qwen3-Coder-480B-A35B-Instruct';
