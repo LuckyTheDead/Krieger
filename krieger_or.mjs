@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Krieger Multi-Model Orchestrator v3 – OpenRouter-only version
+ * Krieger Multi-Model v3 – OpenRouter version
  */
 
 import readline from "readline";
