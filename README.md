@@ -29,15 +29,15 @@ Krieger's debate team is configured with the following roles and models:
 
 | Model Key | Role                                            | Model Identifier (via OpenRouter)                       |
 | :-------- | :---------------------------------------------- | :------------------------------------------------------ |
-| `deepseek`  | Critical logician                               | `deepseek/deepseek-chat-v3.1:free`                      |
+| `deepseek1`  | Critical logician                               | `deepseek/deepseek-chat-v3.1:free`                      |
 | `mistral`   | Concise factual summarizer and pattern extractor| `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` |
 | `qwen`      | Creative coder and linguistic problem-solver    | `qwen/qwen3-coder:free`                                 |
 | `glm`       | Philosophical / ethical reasoning               | `z-ai/glm-4.5-air:free`                                 |
 | `kimi`      | Experimental AI perspective                     | `moonshotai/kimi-k2:free`                               |
-| `phi`       | Complex scientific reasoning                    | `deepseek/deepseek-r1-distill-llama-70b:free`           |
+| `deepseek2`       | Complex scientific reasoning                    | `deepseek/deepseek-r1-distill-llama-70b:free`           |
 | `gemma`     | Multimodal reasoning and math                   | `google/gemma-3-12b-it:free`                            |
 | `llama`     | Philosophical and ethical reasoning             | `meta-llama/llama-4-maverick:free`                      |
-| `openai`    | **Moderator** — Final synthesis and consistency | `deepseek/deepseek-r1-0528:free`                        |
+| `deepseek3`    | **Moderator** — Final synthesis and consistency | `deepseek/deepseek-r1-0528:free`                        |
 
 ## Getting Started
 
