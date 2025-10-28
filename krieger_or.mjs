@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Krieger Multi-Model Orchestrator v3 – OpenRouter-only version
+ * Krieger Multi-Model v3 – OpenRouter version
  */
 
 import readline from "readline";
@@ -179,7 +179,7 @@ async function runCommands(commands) {
 
     console.log(chalk.yellow(`Executing command: ${cmd}`));
     await new Promise((resolve) => {
-      exec(cmd, { shell: "/data/data/com.termux/files/usr/bin/bash", env: process.env, maxBuffer: 1024 * 1024 },
+      exec(cmd, { shell: "/bin/bash", env: process.env, maxBuffer: 1024 * 1024 },
         (err, stdout, stderr) => {
           let result = `Command: ${cmd}\n`;
           if (err) result += chalk.red(`Error!\n`);
