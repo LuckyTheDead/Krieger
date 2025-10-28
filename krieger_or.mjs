@@ -15,7 +15,7 @@ dotenv.config();
 // === Config ===
 const MEMORY_FILE = "./memory.json";
 const MAX_MESSAGES = 500;
-const DEBATE_ROUNDS = 2;
+const DEBATE_ROUNDS = 5;
 
 // === Persistent Memory ===
 let conversationHistory = [];
@@ -86,11 +86,14 @@ const client = new OpenAI({
 // === Models via OpenRouter ===
 const MODELS = {
   deepseek: "deepseek/deepseek-chat-v3.1:free",
-  mistral: "mistralai/Mistral-Large-2411",
+  mistral: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
   qwen: "qwen/qwen3-coder:free",
-  glm: "meta-llama/llama-4-maverick:free",
-  openai: "gpt-4o-mini",
+  llama: "meta-llama/llama-4-maverick:free",
+  openai: "deepseek/deepseek-r1-0528:free",
   kimi: "moonshotai/kimi-k2:free",
+  gemma: "google/gemma-3-12b-it:free",
+  phi: "deepseek/deepseek-r1-distill-llama-70b:free",
+  glm:"z-ai/glm-4.5-air:free",
 };
 
 // === Model Roles for debate ===
@@ -101,10 +104,13 @@ const MODEL_ROLES = {
   glm: "Philosophical / ethical reasoning.",
   openai: "Moderator — final synthesis and consistency checker.",
   kimi: "Experimental AI perspective.",
+  phi: "Complex scientific reasoning and structured outputs",
+  gemma: "Multimodal reasoning and math",
+  llama: "Philosophical and ethical reasoning",
 };
 
 // === Utility: timeout wrapper ===
-function withTimeout(promise, ms = 25000) {
+function withTimeout(promise, ms = 50000) {
   return Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
@@ -132,7 +138,7 @@ async function queryModel(modelName, messages) {
 // === Silent debate with OpenRouter models ===
 async function silentDebate(history, rounds = DEBATE_ROUNDS) {
   const debateHistory = [...history];
-  const debateModels = ["deepseek", "mistral", "qwen", "glm", "openai"];
+  const debateModels = ["deepseek", "mistral", "qwen", "glm", "openai", "phi", "gemma", "llama"];
 
   for (let i = 0; i < rounds; i++) {
     for (const name of debateModels) {
