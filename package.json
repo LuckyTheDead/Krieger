@@ -22,7 +22,7 @@
     "chatbot"
   ],
   "author": "Lucky",
-  "license": "To Kill",
+  "license": "MIT",
   "dependencies": {
     "chalk": "^5.3.0",
     "dotenv": "^16.4.5",
