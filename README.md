@@ -1,2 +1,3 @@
 # Krieger
-AI Bot
+Run npm install
+
