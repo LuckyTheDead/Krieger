@@ -85,26 +85,26 @@ const client = new OpenAI({
 
 // === Models via OpenRouter ===
 const MODELS = {
-  deepseek: "deepseek/deepseek-chat-v3.1:free",
+  deepseek1: "deepseek/deepseek-chat-v3.1:free",
   mistral: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
   qwen: "qwen/qwen3-coder:free",
   llama: "meta-llama/llama-4-maverick:free",
-  openai: "deepseek/deepseek-r1-0528:free",
+  deepseek2: "deepseek/deepseek-r1-0528:free",
   kimi: "moonshotai/kimi-k2:free",
   gemma: "google/gemma-3-12b-it:free",
-  phi: "deepseek/deepseek-r1-distill-llama-70b:free",
+  deepseek3: "deepseek/deepseek-r1-distill-llama-70b:free",
   glm:"z-ai/glm-4.5-air:free",
 };
 
 // === Model Roles for debate ===
 const MODEL_ROLES = {
-  deepseek: "Critical logician — deep reasoning, rigorous argument.",
+  deepseek1: "Critical logician — deep reasoning, rigorous argument.",
   mistral: "Concise factual summarizer and pattern extractor.",
   qwen: "Creative coder and linguistic problem-solver.",
   glm: "Philosophical / ethical reasoning.",
-  openai: "Moderator — final synthesis and consistency checker.",
+  deepseek2: "Moderator — final synthesis and consistency checker.",
   kimi: "Experimental AI perspective.",
-  phi: "Complex scientific reasoning and structured outputs",
+  deepseek3: "Complex scientific reasoning and structured outputs",
   gemma: "Multimodal reasoning and math",
   llama: "Philosophical and ethical reasoning",
 };
@@ -125,7 +125,7 @@ async function queryModel(modelName, messages) {
       client.chat.completions.create({
         model,
         messages,
-        max_tokens: 300,
+        max_tokens: 250,
       })
     );
     return res.choices[0].message.content;
@@ -138,7 +138,7 @@ async function queryModel(modelName, messages) {
 // === Silent debate with OpenRouter models ===
 async function silentDebate(history, rounds = DEBATE_ROUNDS) {
   const debateHistory = [...history];
-  const debateModels = ["deepseek", "mistral", "qwen", "glm", "openai", "phi", "gemma", "llama"];
+  const debateModels = ["deepseek1", "mistral", "qwen", "glm", "deepseek2", "deepseek3", "gemma", "llama"];
 
   for (let i = 0; i < rounds; i++) {
     for (const name of debateModels) {
@@ -149,7 +149,7 @@ async function silentDebate(history, rounds = DEBATE_ROUNDS) {
   }
 
   // Final synthesis pass by moderator
-  return await queryModel("openai", debateHistory);
+  return await queryModel("deepseek2", debateHistory);
 }
 
 // === Command Extraction & Execution ===
@@ -200,7 +200,7 @@ async function selfEvaluate(answer) {
     { role: "user", content: answer },
   ];
   try {
-    const res = await queryModel("openai", evalPrompt);
+    const res = await queryModel("deepseek2", evalPrompt);
     console.log(chalk.magenta(`\n[Self-Eval] ${res}`));
   } catch {}
 }
@@ -221,7 +221,7 @@ rl.on("line", async (line) => {
   // Quick mode
   if (text.startsWith("!quick")) {
     const q = text.replace("!quick", "").trim();
-    const quickRes = await queryModel("openai", [...conversationHistory, { role: "user", content: q }]);
+    const quickRes = await queryModel("deepseek2", [...conversationHistory, { role: "user", content: q }]);
     console.log(chalk.cyan(`Krieger (Quick): ${quickRes}`));
     conversationHistory.push({ role: "user", content: q });
     conversationHistory.push({ role: "assistant", content: quickRes });
@@ -247,3 +247,4 @@ rl.on("line", async (line) => {
 });
 
 rl.on("close", () => { console.log(chalk.blue("Exiting Krieger Lab. Goodbye!")); saveMemory(); process.exit(0); });
+
