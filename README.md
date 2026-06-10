@@ -1,4 +1,4 @@
-# Krieger: A Multi-Model AI Orchestrator
+# Krieger: A Multi-Model AI Orchestrator created by AI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
