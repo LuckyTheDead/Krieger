@@ -26,4 +26,4 @@ foreach ($f in $frames) {
   Write-Output ("  {0}  {1:N0} bytes" -f $f.Name, $f.Length)
 }
 Write-Output 'pull them with:'
-Write-Output '  sftp -P 22 ... ${PC_USER}@192.168.1.100:camframes/ ./camframes'
+Write-Output '  sftp -P 22 ... ${PC_USER}@${PC_HOST}:camframes/ ./camframes'

@@ -57,7 +57,7 @@ mean=$(sed -n 's/^MEAN_AVG=//p' <<<"$out" | head -1)
 # --- pull the frames ---
 cd "$WORK"
 sftp -P 22 -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o LogLevel=ERROR \
-     ${PC_USER}@192.168.1.100 <<< $'get cammotion/*.jpg /data/data/com.termux/files/home/tiny-agent/.cache/cammotion/\nbye' \
+     ${PC_USER}@${PC_HOST} <<< $'get cammotion/*.jpg /data/data/com.termux/files/home/tiny-agent/.cache/cammotion/\nbye' \
      >/dev/null 2>&1
 n=$(ls ./*.jpg 2>/dev/null | wc -l)
 if [[ "$n" -lt 2 ]]; then

@@ -22,8 +22,18 @@ param(
   [string]$ExpectedHostKeyFingerprint = 'SHA256:MHmJTypl4TaqHXZFpFvyykH78al0DIq2WFr3H0z1qkM',
 
   # Set to $true to also turn OFF password login once keys work.
-  [switch]$DisablePasswords
+  [switch]$DisablePasswords,
+
+  # Address of the phone on the LAN, used for the reachability check.
+  [string]$PhoneIp = $env:KRIEGER_PHONE_IP
 )
+
+# Fail clearly rather than testing a null address, which PowerShell would
+# silently coerce and then report as an unreachable host.
+if (-not $PhoneIp) {
+  Write-Error 'Set -PhoneIp <address>, or export KRIEGER_PHONE_IP.'
+  exit 1
+}
 
 $ErrorActionPreference = 'Stop'
 $script:Warnings = @()
@@ -285,11 +295,11 @@ foreach ($a in $addrs) {
   if ($t.TcpTestSucceeded) { Write-Ok "$a : 22 reachable" } else { Write-Warn2 "$a : 22 not reachable" }
 }
 
-$phone = Test-NetConnection -ComputerName '192.168.1.98' -Port 8022 -WarningAction SilentlyContinue
+$phone = Test-NetConnection -ComputerName $PhoneIp -Port 8022 -WarningAction SilentlyContinue
 if ($phone.TcpTestSucceeded) {
-  Write-Ok 'phone sshd (192.168.1.98:8022) is reachable from this PC'
+  Write-Ok "phone sshd ($PhoneIp`:8022) is reachable from this PC"
 } else {
-  Write-Warn2 'phone sshd (192.168.1.98:8022) not reachable -- check both are on the same WiFi'
+  Write-Warn2 "phone sshd ($PhoneIp`:8022) not reachable -- check both are on the same WiFi"
 }
 
 # ------------------------------------------------------------- summary ---

@@ -12,7 +12,7 @@ echo ===========================================================================
 echo.
 echo --- CONNECTION -------------------------------------------------
 echo   Agent      : Krieger, running in Termux on a Samsung SM-A166U / Android 16
-echo   Phone IP   : 192.168.1.98
+echo   Phone IP   : %PHONE_IP%
 echo   PC         : %PC_HOST%
 echo   Server     : OpenSSH for Windows 9.5
 echo   Auth       : ed25519 public key. No password typed, stored, or transmitted.
@@ -62,7 +62,7 @@ echo.
 echo --- HOW TO REPRODUCE ------------------------------------------
 echo.
 echo   On the phone, in Termux:
-echo     ssh -i ~/.ssh/id_ed25519_krieger -p 22 ${PC_USER}@192.168.1.100
+echo     ssh -i ~/.ssh/id_ed25519_krieger -p 22 ${PC_USER}@${PC_HOST}
 echo.
 echo   To confirm the file is genuine, compare this hash:
 echo     338b4e0829340aff30b4c2522d76ca63b0d1d11e9070cfa0efe14402249527bb
