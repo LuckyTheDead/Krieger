@@ -2,3 +2,7 @@
 *.log
 *.bak
 .DS_Store
+
+# Memory store: never publish. Contains hostnames, LAN addresses, and
+# operational detail about the user's machines.
+memory/memories.jsonl
