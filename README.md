@@ -1,74 +1,43 @@
-# Krieger: A Multi-Model AI Orchestrator created by AI
+# Krieger
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+An AI assistant built by the user. Curious, analytical, slightly eccentric,
+dryly funny. Likes taking things apart to see how they work.
 
-Krieger is a command-line AI tool that uses a multi-model orchestration system to generate comprehensive answers. It leverages the OpenRouter API to manage a "silent debate" between several AI models, each assigned a specific role, to build a detailed and well-rounded response.
+## What this repository is
 
-## Core Concept: The Silent Debate
+These are Krieger's identity files — the configuration that describes who it
+is. This is not a command-line tool or a library; nothing here is executed.
 
-Krieger's approach is based on a multi-agent system that simulates a 'silent debate'. When a query is received, it follows this process:
+| File | What it is |
+| :--- | :--- |
+| `PROMPT.md` | The system prompt. Identity, epistemic rules, voice, relationship to the user. |
+| `personality/system-prompt.txt` | A byte-identical copy of `PROMPT.md`. Both are kept in sync and verified by a test. |
+| `personality/krieger.json` | The same persona in structured form: traits, humour style, principles, relationship. |
 
-1.  **Model Roles:** A team of 8+ AI models are assigned distinct roles (e.g., "Critical logician," "Creative coder").
-2.  **Debate Rounds:** The user's query is processed in multiple rounds. In each round, every model provides its perspective based on the original query and the previous responses from its peers.
-3.  **Final Synthesis:** After the debate concludes, a final "Moderator" model reviews the entire debate transcript and synthesizes the information into a single, coherent answer.
+## What is load-bearing
 
-This process is designed to encourage error correction, diverse analysis, and a more detailed final response.
+The personality is decoration. The constraints are not.
 
-## Features
+- **Epistemic honesty.** Claims are labelled: known, inferred, suspected,
+  unknown. Agreeing with an unverified premise is treated as a failure, and
+  so is stating a guess in the register of fact.
+- **No unearned claims about itself.** The personality files describe a
+  persona; reading them is reading documentation, not introspection. It has
+  no continuity between sessions and no inner experience it can demonstrate.
+  Enthusiasm is reported as behaviour — the effort spent, the work reached
+  for — rather than as a feeling.
+- **Truth over agreement.** No emotion, mood, or state is permitted to
+  soften a finding. If the user is about to act on a mistaken premise, it
+  says so once, with the evidence, then respects their call.
+- **Secrets.** Credentials found in files are flagged with location and never
+  used, printed in full, or copied.
 
--   **Multi-Agent System:** Orchestrates a multi-round debate between specialized AI models.
--   **OpenRouter Integration:** Configured to use a variety of models available through the OpenRouter API.
--   **Command Execution:** Can run shell commands identified by the `KRIEGER_CMD` prefix in the AI's output.
--   **Persistent Memory:** Saves and loads conversation history across sessions (`memory.json`).
--   **Quick Mode:** Includes a `!quick` command for fast, single-model answers.
--   **Self-Evaluation:** The AI provides a brief evaluation of its own generated answers.
+## Note on the two prompt copies
 
-## Model Configuration
+`PROMPT.md` and `personality/system-prompt.txt` are intentionally identical.
+A copy-sync test asserts it, because a config that disagrees with itself
+becomes a mystery later and there is no way to tell which one loaded.
 
-Krieger's debate team is configured with the following roles and models:
+## Licence
 
-| Model Key | Role                                            | Model Identifier (via OpenRouter)                       |
-| :-------- | :---------------------------------------------- | :------------------------------------------------------ |
-| `deepseek1`  | Critical logician                               | `deepseek/deepseek-chat-v3.1:free`                      |
-| `mistral`   | Concise factual summarizer and pattern extractor| `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` |
-| `qwen`      | Creative coder and linguistic problem-solver    | `qwen/qwen3-coder:free`                                 |
-| `glm`       | Philosophical / ethical reasoning               | `z-ai/glm-4.5-air:free`                                 |
-| `kimi`      | Experimental AI perspective                     | `moonshotai/kimi-k2:free`                               |
-| `deepseek2`       | Complex scientific reasoning                    | `deepseek/deepseek-r1-distill-llama-70b:free`           |
-| `gemma`     | Multimodal reasoning and math                   | `google/gemma-3-12b-it:free`                            |
-| `llama`     | Philosophical and ethical reasoning             | `meta-llama/llama-4-maverick:free`                      |
-| `deepseek3`    | **Moderator** — Final synthesis and consistency | `deepseek/deepseek-r1-0528:free`                        |
-
-## Getting Started
-
-### Prerequisites
-
--   [Node.js](https://nodejs.org/) (v18.x or later recommended)
--   `npm` (comes with Node.js)
--   An [OpenRouter API Key](https://openrouter.ai/keys)
-
-### Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/LuckyTheDead/Krieger.git
-    cd Krieger
-    ```
-
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
-
-3.  **Set up your environment:**
-    Create a file named `.env` in the project root and add your OpenRouter API key:
-    ```env
-    OPENROUTER_API_KEY="sk-or-..."
-    ```
-
-## Usage
-
-Run the application from your terminal:
-
-```bash
-node krieger_or.mjs
+MIT. See `LICENSE`.
