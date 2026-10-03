@@ -1,8 +1,37 @@
+# Dependencies — reproducible from package.json / package-lock.json
+node_modules/
+
+# The memory store. Never publish: it records LAN addresses, hostnames and
+# operational detail about the user's machines. It is also personal.
+memory/
+memory/memories.jsonl
+
+# Credentials
 .env
+agent.json
+
+# Runtime state — rewritten on every run, so committing it would produce a
+# diff on every scheduler firing. The events behind these live in the run log.
+daemon/runs.jsonl
+daemon/scheduler.log
+daemon/scheduler.pid
+daemon/scheduler.lock
+daemon/state.json
+daemon/affect.json
+daemon/emotions.json
+daemon/*.log
+daemon/*.pid
+daemon/*.lock
+
+# IRC session state — the log and inbox are private conversation.
+daemon/irc/
+
+# Scratch and generated output
+.cache/
+camframes/
+site/.probe/
 *.log
 *.bak
+.scratch/
+.scratch-*.mjs
 .DS_Store
-
-# Memory store: never publish. Contains hostnames, LAN addresses, and
-# operational detail about the user's machines.
-memory/memories.jsonl

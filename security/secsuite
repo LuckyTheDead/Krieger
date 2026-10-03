@@ -1,0 +1,123 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# secsuite -- run every check in this directory, report one verdict.
+#
+#   ./security/secsuite              full run
+#   ./security/secsuite --quick      skip the network-dependent checks
+#
+# Exit: 0 clean, 1 findings, 2 a check could not run.
+#
+# DESIGN NOTE. Every tool here reports findings and lets a human judge. This
+# wrapper deliberately does NOT collapse them into one number: "1 finding" is
+# not actionable, and a score would imply a precision these regex scanners do not
+# have. What it does give you is one place to run, and an honest statement of
+# which checks could not run at all -- a check that silently skipped is worse
+# than no check, because it reads as a pass.
+
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 2
+REPO="$PWD"
+export REPO_DIR="$REPO"
+QUICK=0
+[[ "${1:-}" == "--quick" ]] && QUICK=1
+
+FAILED=()
+SKIPPED=()
+RAN=0
+
+run() {
+  local name="$1"; shift
+  printf '\n\033[1m--- %s ---\033[0m\n' "$name"
+  if "$@"; then
+    RAN=$((RAN + 1))
+  else
+    RAN=$((RAN + 1))
+    FAILED+=("$name")
+  fi
+}
+
+# Resolve the interpreter once. `python3` is correct on Termux and does not
+# exist on Windows, where the Store app-execution alias named `python` is a stub
+# that exits 0 with no output -- which would make every check below report
+# success while scanning nothing. Fail loudly instead.
+resolve_python() {
+  local c
+  for c in "${SECURITY_PYTHON:-}" python3 \
+           "/c/Users/${USERNAME:-}/tools/python/python.exe" \
+           "${USERPROFILE:-/nonexistent}/tools/python/python.exe" python; do
+    [ -n "$c" ] || continue
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys' >/dev/null 2>&1; then
+      echo "$c"; return 0
+    fi
+    # a bare path may still be directly executable
+    if [ -x "$c" ] && "$c" -c 'import sys' >/dev/null 2>&1; then echo "$c"; return 0; fi
+  done
+  return 1
+}
+
+PY="$(resolve_python)"
+if [ -z "$PY" ]; then
+  echo "FAIL: no working python interpreter found (tried SECURITY_PYTHON, python3, python)"
+  echo "      On Windows install one and set SECURITY_PYTHON to its full path."
+  exit 1
+fi
+
+printf '\033[1mtiny-agent security suite\033[0m  %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+# 1. Credentials in the tree. The baseline records the one finding already
+#    reviewed and accepted (a redaction test fixture), so a non-zero exit means
+#    something NEW rather than the same known-safe row forever.
+run "secretscan (credentials)" \
+  "$PY" security/secretscan --baseline security/secretscan-baseline.txt "$REPO"
+
+# 2. Known-weak source patterns. Lab fixtures are excluded from the count but
+#    still shown, so the vulnlab keeps working as a fixture.
+run "codescan (weak patterns)" \
+  "$PY" security/codescan "$REPO"
+
+# 3. This device's own exposure and posture.
+run "hostaudit (services, credentials, git)" \
+  ./security/hostaudit
+
+# 4. Dependency reachability and pinning.
+run "depcheck (dependencies)" \
+  "$PY" security/depcheck "$REPO"
+
+# 5. The lab: prove the scanners can still catch something.
+if pgrep -f vulnlab >/dev/null 2>&1; then
+  printf '\n\033[1m--- vulnlab reachable ---\033[0m\n'
+  curl -sS --max-time 5 "http://127.0.0.1:8099/weakhash?pw=test" 2>/dev/null | head -1 \
+    && RAN=$((RAN + 1)) \
+    || { echo "vulnlab is running but not answering on 8099"; FAILED+=("vulnlab"); }
+else
+  printf '\n\033[1m--- vulnlab ---\033[0m\n'
+  echo "not running. start with: node security/vulnlab.mjs &"
+  SKIPPED+=("vulnlab (not running)")
+fi
+
+# 6. TLS on the endpoints we actually talk to.
+if [[ $QUICK -eq 1 ]]; then
+  SKIPPED+=("tlscheck (--quick)")
+else
+  for host in openrouter.ai huggingface.co; do
+    printf '\n\033[1m--- tlscheck %s ---\033[0m\n' "$host"
+    if node security/tlscheck.mjs "$host"; then
+      RAN=$((RAN + 1))
+    else
+      RAN=$((RAN + 1))
+      FAILED+=("tlscheck $host")
+    fi
+  done
+fi
+
+printf '\n\033[1m=== summary ===\033[0m\n'
+printf 'ran:      %d\n' "$RAN"
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+  printf 'skipped:  %s\n' "${SKIPPED[*]}"
+  printf '           (a skipped check is NOT a pass)\n'
+fi
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  printf 'findings: %s\n' "${FAILED[*]}"
+  exit 1
+fi
+printf 'no findings\n'
+exit 0

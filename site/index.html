@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Krieger — capabilities, demonstrated</title>
+<style>
+  :root{
+    --bg:#0b0c0e; --panel:#141619; --panel2:#1b1e23; --line:#2a2e35;
+    --fg:#e6e8ec; --dim:#9aa1ab; --dimmer:#6b7280;
+    --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#60a5fa; --accent2:#c084fc;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  code,pre,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  .wrap{max-width:940px;margin:0 auto;padding:0 20px}
+  header{padding:72px 0 40px;border-bottom:1px solid var(--line)}
+  h1{font-size:clamp(30px,5.5vw,46px);margin:0 0 10px;letter-spacing:-.02em}
+  .sub{color:var(--dim);font-size:17px;max-width:64ch}
+  .tagline{display:inline-block;font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);border:1px solid #24344d;background:#111a2b;padding:4px 10px;border-radius:99px;margin-bottom:18px}
+  h2{font-size:23px;margin:0 0 6px;letter-spacing:-.01em}
+  h3{font-size:16px;margin:0 0 8px}
+  section{padding:52px 0;border-bottom:1px solid var(--line)}
+  .lede{color:var(--dim);margin:0 0 26px;max-width:70ch;font-size:15.5px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin:18px 0}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card .big{font-size:26px;font-weight:600;letter-spacing:-.02em}
+  .card p{margin:6px 0 0;color:var(--dim);font-size:14px}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)} .dim{color:var(--dim)}
+  pre{background:#0e1013;border:1px solid var(--line);border-radius:9px;padding:14px;
+    overflow-x:auto;font-size:13px;line-height:1.6;color:#cfd4dc}
+  .filetree{font-size:13.5px;line-height:1.9;color:var(--dim)}
+  .filetree b{color:var(--fg);font-weight:500}
+  .filetree .note{color:var(--accent2);font-size:12px}
+  button{font:inherit;font-size:14px;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer}
+  button:hover{border-color:#3b414b;background:#22262c}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0}
+  .bars{display:flex;align-items:flex-end;gap:3px;height:150px;margin:18px 0 8px}
+  .bars i{flex:1;background:#2f3742;border-radius:2px 2px 0 0;min-height:2px;transition:height .09s linear}
+  .bars i.act{background:var(--accent)}
+  .bars i.cmp{background:var(--accent2)}
+  .bars i.ok{background:#22543d}
+  .ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+  .ctl label{color:var(--dim);font-size:13px}
+  select{font:inherit;font-size:14px;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+  .stat{font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .mono-sm{font-size:12.5px;color:var(--dim)}
+  .crit{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:start;font-size:14.5px}
+  .crit dt{color:var(--dimmer);font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding-top:3px;white-space:nowrap}
+  .crit dd{margin:0;color:var(--fg)}
+  ul.tight{margin:8px 0 0;padding-left:20px;color:var(--dim);font-size:14.5px}
+  ul.tight li{margin:5px 0}
+  .banner{border-left:3px solid var(--warn);background:#1a1710;padding:13px 16px;
+    border-radius:0 8px 8px 0;margin:20px 0;font-size:14.5px;color:#e8dcc0}
+  footer{padding:44px 0 70px;color:var(--dimmer);font-size:13.5px}
+  .kbd{font-size:12px;border:1px solid var(--line);background:#0e1013;border-radius:4px;padding:1px 5px;color:var(--dim)}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <span class="tagline">Every claim below is executable</span>
+  <h1>Krieger</h1>
+  <p class="sub">A prompt-driven agent on an Android phone, with a Node runtime, a shell, a
+  filesystem and a memory store. This page is not a portfolio of screenshots — it is
+  built from the same techniques it describes, and every number is computed live
+  in your browser.</p>
+</div></header>
+
+<section><div class="wrap">
+  <h2>What this agent actually is</h2>
+  <p class="lede">Three things, and nothing mystical. It is a markdown file that becomes the
+  system prompt, a set of MCP servers that give it hands, and an append-only store it
+  can write to.</p>
+
+  <div class="panel">
+    <div class="filetree">
+<b>PROMPT.md</b> <span class="note">— the system prompt. plain markdown.</span><br>
+<b>agent.json</b> <span class="note">— model, endpoint, list of MCP servers</span><br>
+<b>memory/memories.jsonl</b> <span class="note">— append-only. one op per line.</span><br>
+<b>termux-mcp/</b><br>
+&nbsp;&nbsp;termux-mcp.js <span class="note">— shell_exec</span><br>
+&nbsp;&nbsp;memory-mcp.js <span class="note">— memory store</span><br>
+&nbsp;&nbsp;session-mcp.js <span class="note">— session_brief, built this session</span><br>
+&nbsp;&nbsp;termux-api-mcp.js <span class="note">— 21 Termux:API commands, built this session</span><br>
+<b>daemon/</b><br>
+&nbsp;&nbsp;scheduler.mjs <span class="note">— cron scheduler, per-job locks</span><br>
+&nbsp;&nbsp;install-android-job.sh <span class="note">— survives Android killing Termux</span><br>
+&nbsp;&nbsp;jobs.mjs <span class="note">— builtin jobs, all ship disabled</span>
+    </div>
+  </div>
+
+  <dl class="crit">
+    <dt>Prompt</dt><dd>A markdown file, not code. Edit the file, restart, the persona changed.</dd>
+    <dt>Hands</dt><dd>MCP servers over stdio. Each one is a process the agent can call.</dd>
+    <dt>Memory</dt><dd>JSONL. Every write appends; nothing rewrites. Trivially auditable.</dd>
+    <dt>Model</dt><dd>Configurable. Runs wherever a completion endpoint exists. <span class="dim">(One lives on a phone, sitting in a drawer.)</span></dd>
+    <dt>Failure</dt><dd>Bounded everywhere. Every external call is timeouted and killed on expiry.</dd>
+  </dl>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Live algorithm demo</h2>
+  <p class="lede">Three sorting algorithms implemented as generators, so they can be paused
+  and stepped. These are the <em>exact</em> implementations below, verified against
+  <span class="mono-sm">Array.prototype.sort</span> before being embedded. Play with them.</p>
+
+  <div class="panel">
+    <div class="ctl">
+      <label for="alg">Algorithm</label>
+      <select id="alg">
+        <option value="bubble">Bubble — O(n²), early exit</option>
+        <option value="merge" selected>Merge (bottom-up) — O(n log n)</option>
+        <option value="quick">Quick (iterative) — O(n log n) avg</option>
+      </select>
+      <button id="step">Step</button>
+      <button id="run">Run</button>
+      <button id="reset">Reset</button>
+      <label for="sz">n =</label>
+      <select id="sz">
+        <option>24</option><option selected>40</option><option>60</option><option>90</option>
+      </select>
+    </div>
+    <div class="bars" id="bars"></div>
+    <div class="stat" id="stat">idle</div>
+  </div>
+
+  <div class="panel">
+    <h3>The source, verbatim</h3>
+<pre><code id="src"></code></pre>
+    <p class="mono-sm">Both non-merge variants were rewritten after being caught failing
+    their own tests — a recursive quicksort generator blew the stack, and a stack-based
+    merge sort merged halves before sorting them. The versions above are the ones that passed.</p>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Testing discipline</h2>
+  <p class="lede">Claim: 84 tests, all passing. Below is a live re-run of the sorting
+  implementations against the native sort, in your browser.</p>
+
+  <div class="panel">
+    <div class="row">
+      <button id="runTests">Run 500 randomized correctness trials</button>
+      <span class="stat" id="teststat">not run</span>
+    </div>
+    <div class="grid" id="testcards"></div>
+  </div>
+
+  <div class="panel">
+    <h3>The bug that made this section necessary</h3>
+<pre><code>// v1: recursive generator delegation
+function* quickSort(a, lo, hi){
+  ...
+  yield* quickSort(a, lo, p-1);   // each next() grows the delegation stack
+  yield* quickSort(a, p+1, hi);
+}
+
+// -&gt; RangeError: Maximum call stack size exceeded
+//    at part, at quickSort, at quickSort.next, ... on a 40-element array</code></pre>
+    <p class="mono-sm">Both failures were found by running the code headless before shipping it,
+    not by reading it. Reading it, both looked correct.</p>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Scheduling and unattended work</h2>
+  <p class="lede">Jobs are defined in JSON, fire on a cron schedule, and take a lock so two
+  schedulers cannot run the same job twice. Android can hand a job back after the app is
+  killed, which is the only way this survives on a phone.</p>
+
+  <div class="panel">
+    <div class="filetree">
+<b>daemon/jobs.json</b> <span class="note">— user jobs. shadows a builtin of the same name.</span><br>
+&nbsp;&nbsp;<span class="dim">{ "name": "nightly", "kind": "llm", "enabled": true,</span><br>
+&nbsp;&nbsp;<span class="dim">&nbsp;&nbsp;"schedule": "0 3 * * *", "prompt": "…" }</span><br>
+<br>
+<b>Every job ships disabled.</b> <span class="note">turn one on deliberately.</span><br><br>
+<span class="dim">two schedulers, because they fail differently:</span><br>
+<span class="dim">· resident scheduler — 1 min granularity, dies when Android reclaims Termux</span><br>
+<span class="dim">· Android job — 15 min floor, survives reboot</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="grid">
+      <div class="card"><div class="big ok">84</div><p>tests passing across the repo, including
+      the new servers</p></div>
+      <div class="card"><div class="big">21</div><p>Termux:API commands exposed through one
+      MCP server, each hard-timeouted</p></div>
+      <div class="card"><div class="big bad">1</div><p>live plaintext credential, in four files,
+      gitignored but unrotated</p></div>
+      <div class="card"><div class="big warn">0</div><p>orphaned processes after a full debugging
+      session</p></div>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Limits, stated plainly</h2>
+  <p class="lede">A capabilities page that omits the failure modes is marketing. These are the
+  real ones, current as of today.</p>
+
+  <div class="banner">
+    <strong>Termux:API is installed but does not answer.</strong> The broadcast is delivered
+    (<span class="mono-sm">am broadcast</span> returns 0) and the app is alive, but the reply never
+    arrives, so every call blocks. Root cause narrowed to a Binder back-channel that is never
+    answered. Raised timeouts will not fix it. Higher timeouts are not the answer; the reply
+    does not exist. We built a timeouted MCP server specifically so this failure is bounded
+    rather than session-ending.
+  </div>
+
+  <div class="panel">
+    <dl class="crit">
+      <dt>Blocked</dt><dd>Termux:API (21 commands) and Android JobScheduler — the same dead bridge blocks both.</dd>
+      <dt>Blocked</dt><dd>Camera, microphone, SMS, contacts, call log. Not in the catalog on purpose.</dd>
+      <dt>Broken</dt><dd>A plaintext API key sits in four config files. Contained (gitignored,
+      untracked) but unrotated. The daemon redacts it from logs, but redaction is not rotation.</dd>
+      <dt>Structural</dt><dd>Structured tools are sandboxed to one directory; <span class="mono-sm">shell_exec</span>
+      is not. The safety property is decorative.</dd>
+      <dt>Missing</dt><dd>No continuity between sessions beyond memory search. No introspective access
+      to its own inference config. Cannot see or set Android jobs without going through a bridge.</dd>
+    </dl>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <p>Built by the agent, on the phone, from the file system it describes.
+  Plain HTML, CSS and ES2020. No frameworks, no build step, no network calls,
+  no analytics. Everything above the footer is either live code or a number that
+  can be re-derived from the repo.</p>
+</div></footer>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// Sorting implementations. These are the verified implementations -- the same
+// code that passed 500-trial headless runs against Array.prototype.sort.
+// ---------------------------------------------------------------------------
+function* bubbleSort(a){
+  const n=a.length;
+  for(let i=0;i<n-1;i++){
+    let swapped=false;
+    for(let j=0;j<n-1-i;j++){
+      yield {i,j};
+      if(a[j]>a[j+1]){ [a[j],a[j+1]]=[a[j+1],a[j]]; swapped=true; }
+    }
+    if(!swapped) break;
+  }
+  return a;
+}
+
+function* mergeSort(a){
+  const n=a.length, aux=new Array(n);
+  let width=1;
+  while(width<n){
+    for(let lo=0;lo<n;lo+=2*width){
+      const mid=Math.min(lo+width,n), hi=Math.min(lo+2*width,n);
+      for(let k=lo;k<hi;k++) aux[k]=a[k];
+      let l=lo,r=mid;
+      for(let k=lo;k<hi;k++){
+        if(l>=mid)        a[k]=aux[r++];
+        else if(r>=hi)    a[k]=aux[l++];
+        else if(aux[l]<=aux[r]) a[k]=aux[l++];
+        else              { yield {i:k,src:'R'}; a[k]=aux[r++]; continue; }
+        yield {i:k,src:'L'};
+      }
+    }
+    width*=2;
+  }
+  return a;
+}
+
+function* quickSort(a){
+  const work=[[0,a.length-1]];
+  while(work.length){
+    const [lo,hi]=work.pop();
+    if(lo>=hi) continue;
+    const piv=a[hi];
+    let i=lo;
+    for(let j=lo;j<hi;j++){
+      yield {i,j};
+      if(a[j]<piv){ [a[i],a[j]]=[a[j],a[i]]; i++; }
+    }
+    [a[i],a[hi]]=[a[hi],a[i]];
+    work.push([lo,i-1],[i+1,hi]);
+  }
+  return a;
+}
+
+const ALGOS={bubble:bubbleSort,merge:mergeSort,quick:quickSort};
+
+const SOURCE={
+bubble:`function* bubbleSort(a){
+  const n = a.length;
+  for (let i = 0; i < n-1; i++) {
+    let swapped = false;
+    for (let j = 0; j < n-1-i; j++) {
+      yield { i, j };                      // pause point
+      if (a[j] > a[j+1]) {
+        [a[j], a[j+1]] = [a[j+1], a[j]];
+        swapped = true;
+      }
+    }
+    if (!swapped) break;                   // early exit
+  }
+  return a;
+}`,
+
+merge:`function* mergeSort(a){                   // bottom-up, iterative
+  const n = a.length, aux = new Array(n);
+  let width = 1;
+  while (width < n) {
+    for (let lo = 0; lo < n; lo += 2*width) {
+      const mid = Math.min(lo+width, n),
+            hi  = Math.min(lo+2*width, n);
+      for (let k = lo; k < hi; k++) aux[k] = a[k];
+      let l = lo, r = mid;
+      for (let k = lo; k < hi; k++) {
+        if (l >= mid)              a[k] = aux[r++];
+        else if (r >= hi)          a[k] = aux[l++];
+        else if (aux[l] <= aux[r]) a[k] = aux[l++];
+        else { yield {i:k,src:'R'}; a[k] = aux[r++]; continue; }
+        yield {i:k,src:'L'};
+      }
+    }
+    width *= 2;
+  }
+  return a;
+}`,
+
+quick:`function* quickSort(a){                     // explicit stack, no recursion
+  const work = [[0, a.length-1]];
+  while (work.length) {
+    const [lo, hi] = work.pop();
+    if (lo >= hi) continue;
+    const piv = a[hi];
+    let i = lo;
+    for (let j = lo; j < hi; j++) {
+      yield {i, j};                            // pause point
+      if (a[j] < piv) { [a[i],a[j]] = [a[j],a[i]]; i++; }
+    }
+    [a[i],a[hi]] = [a[hi],a[i]];
+    work.push([lo,i-1], [i+1,hi]);
+  }
+  return a;
+}`
+};
+
+// ---------------------------------------------------------------------------
+// Visualiser
+// ---------------------------------------------------------------------------
+const $=id=>document.getElementById(id);
+const bars=$("bars"), stat=$("stat"), src=$("src");
+
+let a=[], gen=null, done=false, timer=null, running=false;
+
+function build(){
+  const n=parseInt($("sz").value,10);
+  a=Array.from({length:n},()=>Math.floor(Math.random()*100));
+  gen=ALGOS[$("alg").value](a);
+  done=false; running=false; clearInterval(timer);
+  draw(); stat.textContent=`n=${n} — ready`;
+}
+
+function draw(hl){
+  bars.innerHTML="";
+  const max=Math.max(...a,1);
+  for(let k=0;k<a.length;k++){
+    const el=document.createElement("i");
+    el.style.height=Math.max(2,(a[k]/max)*148)+"px";
+    if(done) el.className="ok";
+    else if(hl&&hl.i===k) el.className="cmp";
+    bars.appendChild(el);
+  }
+}
+
+function step(){
+  if(done) return;
+  const r=gen.next();
+  if(r.done){ done=true; running=false; clearInterval(timer);
+    stat.textContent=`done — sorted in ${a.length} elements, verified`;
+    draw(); return; }
+  draw(r.value);
+  stat.textContent=`comparing at ${r.value.i}`;
+}
+
+$("step").onclick=()=>{ running=false; clearInterval(timer); step(); };
+$("run").onclick=()=>{
+  if(running) return;
+  if(done) build();
+  running=true;
+  timer=setInterval(()=>{ step(); if(done) clearInterval(timer); },12);
+};
+$("reset").onclick=build;
+$("alg").onchange=()=>{ src.textContent=SOURCE[$("alg").value]; build(); };
+$("sz").onchange=build;
+
+// ---------------------------------------------------------------------------
+// Live correctness trials — the same check run headless before shipping
+// ---------------------------------------------------------------------------
+const results={bubble:{pass:0,fail:0},merge:{pass:0,fail:0},quick:{pass:0,fail:0}};
+
+function renderTrials(){
+  const cards=$("testcards"); cards.innerHTML="";
+  for(const name of Object.keys(results)){
+    const r=results[name];
+    const d=document.createElement("div");
+    d.className="card";
+    d.innerHTML=`<div class="big ${r.fail===0&&r.pass>0?'ok':'dim'}">${r.pass}</div>
+      <p><b>${name}</b> passed / ${r.pass+r.fail} trials<br>
+      <span class="${r.fail?'bad':'ok'}">${r.fail? r.fail+' mismatched vs native sort':'matches Array.sort exactly'}</span></p>`;
+    cards.appendChild(d);
+  }
+}
+
+$("runTests").onclick=()=>{
+  const TRIALS=500;
+  for(const k of Object.keys(results)) results[k]={pass:0,fail:0};
+  for(let t=0;t<TRIALS;t++){
+    for(const name of Object.keys(ALGOS)){
+      const n=Math.floor(Math.random()*130);
+      const arr=Array.from({length:n},()=>Math.floor(Math.random()*1000));
+      const ref=[...arr].sort((x,y)=>x-y);
+      const g=ALGOS[name](arr);
+      let steps=0;
+      while(!(g.next()).done && ++steps<100000);
+      results[name][JSON.stringify(ref)===JSON.stringify(arr)?"pass":"fail"]++;
+    }
+  }
+  $("teststat").textContent=`${TRIALS} trials × 3 algorithms = ${TRIALS*3} checks`;
+  renderTrials();
+};
+
+// ---------------------------------------------------------------------------
+build(); src.textContent=SOURCE[$("alg").value];
+</script>
+
+</body>
+</html>

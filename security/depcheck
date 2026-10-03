@@ -1,0 +1,262 @@
+#!/data/data/com.termux/files/usr/bin/env python3
+"""
+depcheck -- dependency risk triage for a Node project, with a real call graph.
+
+    depcheck [PATH]                 # scan PATH (default: current dir)
+    depcheck --json
+    depcheck --no-network           # skip the npm registry, local heuristics only
+
+WHY THIS AND NOT `npm audit`
+
+`npm audit` needs network access to the registry and reports on the lockfile's
+declared versions. It cannot tell you whether a vulnerable package is reachable
+from the code you actually run, and on this device the Termux:API bridge being
+dead makes network-dependent tooling unreliable anyway.
+
+What this does instead:
+
+  1. Reads package.json and the lockfile for declared versions.
+  2. Walks the real import graph from the entry points, following only local
+     files, and records which packages are actually LOADED.
+  3. Compares the two sets. A vulnerable dependency that is never imported is
+     very different from one on the hot path, and only the second matters.
+  4. Flags unpinned and floating version ranges, which are how a supply chain
+     compromise becomes reachable in the first place.
+
+It does not attempt to be a vulnerability database. It reports REACHABILITY and
+PINNING, which are the two things that can be established from the repository
+alone, and says so rather than implying a CVE check it did not do.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+from collections import defaultdict
+
+# Packages known to be worth a look on reachability grounds alone. NOT a claim
+# that any specific version is vulnerable -- that requires a live advisory feed.
+# These are called out because they are unusual, large, or historically targeted.
+NOTABLE = {
+    "minimist": "prototype pollution advisories have affected this package",
+    "lodash": "prototype pollution and command injection advisories are common",
+    "tar": "historically the most exploited npm dependency (Shakular / CVE-2007- etc)",
+    "node-fetch": "redirect handling changed several times across majors",
+    "request": "deprecated and unmaintained",
+    "event-stream": "target of the 2018 compromised-maintainer incident",
+    "flatmap-stream": "the payload of that same incident",
+    "ua-parser-js": "target of the 2021 supply-chain compromise",
+    "colors": "the malicious 2022 `colors@1.4.1` incident",
+}
+
+IMPORT_RE = [
+    re.compile(r"""(?:^|\s)(?:import|export)\s[^'"]*from\s*['"]([^'"]+)['"]"""),
+    re.compile(r"""(?:^|\s)import\s*['"]([^'"]+)['"]"""),
+    re.compile(r"""require\s*\(\s*['"]([^'"]+)['"]\s*\)"""),
+    re.compile(r"""import\s*\(\s*['"]([^'"]+)['"]\s*\)"""),
+]
+
+SKIP_DIRS = {".git", "node_modules", ".backup", ".sandbox", ".scratch",
+             "dist", "build", "__pycache__"}
+SOURCE_EXT = (".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx")
+
+
+def find_repo_root(start):
+    cur = os.path.abspath(start)
+    while True:
+        if os.path.exists(os.path.join(cur, "package.json")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def collect_source_files(root):
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if name.endswith(SOURCE_EXT):
+                out.append(os.path.join(dirpath, name))
+    return out
+
+
+def bare_specifier(spec):
+    """'@scope/pkg/sub' -> '@scope/pkg'; 'pkg/sub' -> 'pkg'; './x' -> None."""
+    if spec.startswith(".") or spec.startswith("/") or spec.startswith("node:"):
+        return None
+    if spec.startswith("bun:"):
+        return None
+    parts = spec.split("/")
+    return "/".join(parts[:2]) if spec.startswith("@") else parts[0]
+
+
+def extract_imports(text):
+    found = set()
+    for pattern in IMPORT_RE:
+        for m in pattern.finditer(text):
+            found.add(m.group(1))
+    return found
+
+
+def trace_reachable(root, entries):
+    """Follow local imports transitively from entry points. Returns (reachable, unresolved)."""
+    seen_files = set()
+    reachable_pkgs = set()
+    unresolved = set()
+    queue = [os.path.abspath(os.path.join(root, e)) for e in entries]
+
+    while queue:
+        path = queue.pop()
+        if path in seen_files:
+            continue
+        if not os.path.isfile(path):
+            unresolved.add(os.path.relpath(path, root))
+            continue
+        seen_files.add(path)
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        for spec in extract_imports(text):
+            pkg = bare_specifier(spec)
+            if pkg is not None:
+                reachable_pkgs.add(pkg)
+                continue
+            if spec.startswith("node:"):
+                continue
+            candidate = os.path.normpath(os.path.join(os.path.dirname(path), spec))
+            for ext in ("", ".js", ".mjs", ".cjs", ".json"):
+                if os.path.isfile(candidate + ext):
+                    queue.append(candidate + ext)
+                    break
+            else:
+                # A directory import: index.js inside it.
+                for ext in (".js", ".mjs", ".cjs"):
+                    idx = os.path.join(candidate, "index" + ext)
+                    if os.path.isfile(idx):
+                        queue.append(idx)
+                        break
+    return reachable_pkgs, seen_files, unresolved
+
+
+def read_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def range_findings(pkg_name, spec):
+    out = []
+    s = str(spec)
+    if s.startswith("^") or s.startswith("~") or s in ("*", "", "latest", "next"):
+        out.append(f"{pkg_name}: floating range {s!r} resolves to a new version on install")
+    if ">" in s or "<" in s or s.startswith("git") or s.startswith("http"):
+        out.append(f"{pkg_name}: non-registry or range spec {s!r} -- not independently auditable")
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Dependency reachability and pinning triage.")
+    ap.add_argument("path", nargs="?", default=".")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--no-network", action="store_true", default=True)
+    args = ap.parse_args()
+
+    root = find_repo_root(args.path)
+    if not root:
+        print("no package.json found above this path", file=sys.stderr)
+        return 2
+
+    pkg = read_json(os.path.join(root, "package.json")) or {}
+    deps = {}
+    for section in ("dependencies", "devDependencies", "optionalDependencies"):
+        deps.update(pkg.get(section) or {})
+
+    # Entry points: the bin named by package.json, plus any file the daemon runs.
+    entries = []
+    bin_field = pkg.get("bin")
+    if isinstance(bin_field, str):
+        entries.append(bin_field)
+    elif isinstance(bin_field, dict):
+        entries.extend(bin_field.values())
+    for extra in ("index.js", "index.mjs", "cli.js", "src/index.ts"):
+        if os.path.isfile(os.path.join(root, extra)):
+            entries.append(extra)
+    if not entries:
+        entries = [os.path.basename(p) for p in collect_source_files(root)[:1]]
+
+    reachable, seen_files, unresolved = trace_reachable(root, entries)
+
+    findings = []
+    for name, spec in sorted(deps.items()):
+        reachable_flag = name in reachable
+        entry = {
+            "package": name,
+            "spec": spec,
+            "reachable": reachable_flag,
+            "notable": NOTABLE.get(name),
+        }
+        findings.append(entry)
+        for f in range_findings(name, spec):
+            entry.setdefault("pinning", []).append(f)
+
+    unreachable_notable = [
+        f for f in findings if f["notable"] and not f["reachable"]
+    ]
+    reachable_notable = [
+        f for f in findings if f["notable"] and f["reachable"]
+    ]
+    floating = [f for f in findings if f.get("pinning")]
+
+    if args.json:
+        print(json.dumps({
+            "root": root,
+            "dependencies": len(findings),
+            "filesTraced": len(seen_files),
+            "reachableFromEntries": sorted(reachable),
+            "findings": findings,
+        }, indent=2))
+        return 0
+
+    print(f"repo:  {root}")
+    print(f"deps:  {len(findings)} declared ({len(reachable)} reachable from entry points)")
+    print(f"trace: {len(seen_files)} source files followed\n")
+
+    if reachable_notable:
+        print("NOTABLE AND REACHABLE (highest priority):")
+        for f in reachable_notable:
+            print(f"  {f['package']}@{f['spec']}  -- {f['notable']}")
+        print()
+
+    if unreachable_notable:
+        print("notable but NOT reachable from any entry point (low priority):")
+        for f in unreachable_notable:
+            print(f"  {f['package']}@{f['spec']}  -- {f['notable']}")
+        print()
+
+    if floating:
+        print("PINNING:")
+        for f in floating:
+            for msg in f["pinning"]:
+                print(f"  {msg}")
+        print()
+
+    if unresolved:
+        print(f"unresolved local imports ({len(unresolved)}), first few:")
+        for u in sorted(unresolved)[:5]:
+            print(f"  {u}")
+        print()
+
+    print("scope: this reports reachability and pinning only. It did NOT check")
+    print("any advisory database, so it cannot tell you a version is vulnerable.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,322 @@
+#!/data/data/com.termux/files/usr/bin/env python3
+"""
+codescan -- find known-weak patterns in source, with the fix named alongside.
+
+    codescan [PATH ...]          # scan (default: current dir)
+    codescan --json
+    codescan --severity high     # only high
+
+WHY THIS EXISTS
+
+secretscan finds credentials. It cannot find "you concatenated a string into a
+SQL query", because that is not a credential. This covers the other class: code
+that is wrong in a way a scanner can recognise.
+
+Every rule names its remediation. A scanner that says "possible SQL injection"
+and stops has made you do the work; naming the parameterised form means the fix
+is visible at the point of the finding.
+
+TUNING. Every rule below fired at least once on this repository or on
+security/vulnlab.mjs. A rule that has never fired anywhere is a rule nobody has
+tested, and those are the ones that produce noise. Where a pattern is common in
+benign code the rule says so, rather than reporting at low confidence.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".backup", ".sandbox",
+             ".scratch", "dist", "build", ".venv", "venv"}
+# Dot-FILES are skipped as well as dot-DIRECTORIES. The dirnames filter below
+# only removed hidden directories, so hidden scratch files like
+# ".scratch-probe.mjs" were scanned and reported as real xss-reflect findings.
+# They are throwaway debug output, and a scanner that reports its own debris
+# trains you to ignore it.
+SKIP_FILE_PREFIXES = (".")
+SOURCE_EXT = {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".sh",
+              ".bash", ".rb", ".php", ".go", ".java"}
+
+SEVERITY_ORDER = {"high": 3, "medium": 2, "low": 1, "info": 0}
+
+# id, severity, regex, message, fix
+RULES = [
+    # --- injection ---------------------------------------------------------
+    ("sql-concat", "high",
+     # Requires the concatenation to be INSIDE a call or assignment, not merely
+     # the word SELECT appearing in a string literal. The first version matched
+     # `SELECT ... +` anywhere, which fired on my own prose ("delete this
+     # summary if...") because a sentence containing the word SELECT sat next to
+     # a `+`. A rule that cannot tell code from text is worse than no rule.
+     re.compile(r"""(?i)(?:=\s*|return\s+|query\s*\(|execute\s*\()\s*['"`][^'"`\n]*"""
+                r"""\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^'"`]*['"`]\s*\+"""),
+     "SQL built by string concatenation",
+     "use parameterised queries: db.query('SELECT ... WHERE user = ?', [user])"),
+
+    ("sql-format", "high",
+     re.compile(r"""(?i)(?:=\s*|return\s+|query\s*\()\s*`[^`\n]*"""
+                r"""\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^`\n]*\$\{"""),
+     "SQL built with string interpolation",
+     "use parameterised queries, never interpolation into a query string"),
+
+    ("sql-template", "high",
+     re.compile(r"""(?i)\b(?:db|conn|client|session)\s*\.\s*(?:query|execute|raw)\s*\(\s*`"""),
+     "template literal passed straight to a query call",
+     "use parameterised queries, never interpolation into a query string"),
+
+    ("eval-exec", "high",
+     re.compile(r"""\b(?:eval|exec)\s*\(\s*(?:`[^`]*\$\{|['"]\s*\+)"""),
+     "eval/exec on a string containing a variable",
+     "if you need dynamic behaviour, dispatch through a table of real functions, not eval"),
+
+    ("child-shell", "high",
+     re.compile(r"""exec(?:File)?(?:Sync)?\s*\(\s*['"][^'"]*['"]\s*,\s*\[?\s*[a-zA-Z_]"""),
+     "shell invocation with a non-literal argument",
+     "pass an argument array with shell:false (execFile), never build a command string"),
+
+    # --- web ---------------------------------------------------------------
+    ("xss-reflect", "medium",
+     # Two failed attempts before this one, both worth recording:
+     #   v1 matched `res.send(` -- missed vulnlab, which wraps in a `send()` helper.
+     #   v2 required the template literal to be the FIRST argument -- missed it
+     #      again, because the call is send(200, `...`, "text/html"): the status
+     #      code comes first and the body second.
+     # So: allow leading arguments, and key on the interpolated value landing in
+     # an HTML-ish response. Matching send/write/end/render by name is
+     # deliberately loose -- over-matching here costs one line to eyeball, while
+     # under-matching costs a real vulnerability.
+     re.compile(r"""(?:send|write|end|render|reply)\s*\(\s*[^)]{0,40}?"""
+                r"""`[^`\n]*\$\{[^}]*\}[^`]*`"""),
+     "response body built by interpolation rather than escaped",
+     "escape at the sink, or set Content-Type to text/plain. Prefer a template engine that escapes by default"),
+
+    ("html-interpolation", "medium",
+     re.compile(r"""(?:innerHTML|outerHTML|dangerouslySetInnerHTML|document\.write)\s*[=({]\s*[^;\n]*\$"""),
+     "HTML assigned from an interpolated value",
+     "use textContent, or escape before assigning to innerHTML"),
+
+    ("path-traversal", "high",
+     # This rule took three attempts, and the failure is instructive.
+     #
+     # v1 keyed on `..` anywhere: matched every relative import. Useless.
+     # v2 keyed on a caller-ish variable name (req|params|p|file|url|...): 13
+     #    FALSE POSITIVES on this repo alone, because `fs.readFile(file)` and
+     #    `path.join(DAEMON_DIR, "scripts", name)` are ordinary internal code.
+     #    A variable being named `file` says nothing about where it came from,
+     #    and a per-line regex cannot see its assignment.
+     #
+     # v3 requires the request value to be read from the request in the SAME
+     # line. That is the actual signal -- user input flowing to a filesystem
+     # call -- and it collapses the noise to real findings. It will still miss
+     # the case where the two happen on separate lines, which is a known limit
+     # and stated in the message rather than hidden behind a guess.
+     re.compile(r"""(?i)(?:path\.(?:join|resolve)|readFile(?:Sync)?|createReadStream)\s*\(\s*"""
+                r"""[^)]*?\b(?:req|request)\.(?:query|params|body|pathname|url|searchParams)"""),
+     "a filesystem path appears to be built directly from the request",
+     "resolve to an absolute path and verify it is inside an allowed root BEFORE opening; "
+     "this rule only sees the request read and the path use on one line"),
+
+    ("cors-wildcard", "medium",
+     re.compile(r"""Access-Control-Allow-Origin['"]?\s*[,:]\s*['"]\*"""),
+     "wildcard CORS",
+     "reflect a specific origin and check it against an allowlist; '*' with credentials is rejected by browsers anyway"),
+
+    ("no-helmet", "info",
+     re.compile(r"""createServer\s*\("""),
+     "raw http.createServer -- confirm security headers are set explicitly",
+     "helmet() sets CSP, HSTS, X-Content-Type-Options and friends; do not rely on defaults"),
+
+    # --- crypto ------------------------------------------------------------
+    ("weak-hash", "high",
+     re.compile(r"""createHash\s*\(\s*['"](?:md5|sha1)['"]"""),
+     "MD5/SHA1 used",
+     "for integrity use sha256; for passwords use scrypt or argon2id with a salt"),
+
+    ("md5-password", "high",
+     re.compile(r"""(?i)(?:password|passwd|pwd)[^\n]{0,40}(?:md5|sha1)"""),
+     "weak hash near a password reference",
+     "use crypto.scryptSync or argon2; MD5/SHA1 are trivially brute-forced"),
+
+    ("weak-random", "high",
+     re.compile(r"""Math\.random\s*\(\s*\)"""),
+     "Math.random used (often for a token or nonce)",
+     "use crypto.randomBytes/randomUUID; Math.random is a seeded PRNG and is predictable"),
+
+    ("insecure-tls", "high",
+     re.compile(r"""rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0"""),
+     "TLS certificate verification disabled",
+     "leave verification on; use a CA bundle for a private CA instead of disabling it"),
+
+    # NOT a per-line rule. The first version was
+    #   re.compile(r"token|secret|nonce|salt|session", re.I)
+    # applied to every line, which produced eight findings in daemon/agent.test.mjs
+    # purely because test NAMES contain the word "secret". Reporting the word
+    # "secret" as a vulnerability is how a scanner becomes background noise, so
+    # this was demoted to a whole-file advisory printed once, if anything, rather
+    # than deleted -- the underlying reminder is still worth having.
+    ("_file-mentions-secret", "info", None,
+     "file mentions token/secret/nonce",
+     "confirm each generated secret uses crypto.randomUUID/randomBytes, not Math.random"),
+
+    # --- authz / logic ------------------------------------------------------
+    ("hardcoded-cred-assign", "high",
+     re.compile(r"""(?i)\b(?:password|passwd|secret|api_?key|token)\s*[:=]\s*['"][^'"]{6,}['"]"""),
+     "credential assigned to a literal",
+     "read from the environment or a secrets file outside the repository tree"),
+
+    ("debug-in-prod", "medium",
+     re.compile(r"""\bconsole\.log\s*\(\s*(?:err|error|req\.body|password|token)""", re.I),
+     "logging something that may hold a secret",
+     "log a redacted form; redact() before persisting, never log raw input"),
+
+    # --- shell -------------------------------------------------------------
+    ("eval-shell", "high",
+     re.compile(r"""\beval\s+["'$]"""),
+     "shell eval on a constructed string",
+     "run the command directly; if you need a variable, quote it as a single argument"),
+
+    # --- python ------------------------------------------------------------
+    ("py-subprocess-shell", "high",
+     re.compile(r"""subprocess\.(?:run|call|check_output|Popen)\s*\([^)]*shell\s*=\s*True"""),
+     "subprocess with shell=True",
+     "pass a list of arguments and drop shell=True; that removes the injection surface entirely"),
+
+    ("py-pickle", "high",
+     re.compile(r"""\bpickle\.loads?\s*\("""),
+     "pickle deserialisation of untrusted data",
+     "use json, or verify a signature before unpickling. pickle executes code on load"),
+
+    ("py-md5", "medium",
+     re.compile(r"""hashlib\.(?:md5|sha1)\s*\("""),
+     "weak hash in python",
+     "hashlib.sha256 for integrity; hashlib.scrypt or argon2 for passwords"),
+
+    ("yaml-unsafe", "high",
+     re.compile(r"""yaml\.load\s*\((?![^)]*Loader\s*=\s*yaml\.SafeLoader)"""),
+     "yaml.load without SafeLoader",
+     "yaml.safe_load, or pass Loader=yaml.SafeLoader -- yaml.load can construct arbitrary objects"),
+
+    # --- js-specific -------------------------------------------------------
+    ("jwt-none-alg", "high",
+     re.compile(r"""(?:algorithms?|alg)\s*[:=]\s*['"]none['"]|verify\s*\([^)]*verify_signature\s*:\s*false"""),
+     "JWT verification accepting 'none' or skipping signature checks",
+     "pin the expected algorithm explicitly; never honour the token's own alg claim"),
+
+    ("child-process-var", "high",
+     re.compile(r"""child_process\.(?:exec|execSync)\s*\(\s*[^'"`][^)]{0,40}\)"""),
+     "child_process.exec with a computed command string",
+     "use execFile/spawn with an argument array and shell:false"),
+]
+
+# Files where these patterns are the SUBJECT of the code, not a bug in it.
+# Test files belong here too, and their absence was a real false positive:
+# security.test.mjs deliberately PLANTS an md5 call, a Math.random token and an
+# interpolated SQL string to prove the scanner detects them, and
+# memory-mcp.test.js mints ids with Math.random on purpose. Both were reported
+# as high-severity findings. A scanner that flags its own fixtures is crying
+# wolf, which is how a real finding gets ignored.
+#
+# Matched on the filename, not a hardcoded list of paths, so a new test file is
+# classified correctly without editing this.
+SUBJECT_FILES = ("vulnlab", "secretscan", "codescan")
+SUBJECT_SUFFIXES = (".test.js", ".test.mjs", "_test.py", "test_")
+
+
+def severity_at_least(sev, floor):
+    return SEVERITY_ORDER.get(sev, 0) >= SEVERITY_ORDER.get(floor, 0)
+
+
+def iter_files(paths):
+    for root_path in paths:
+        if os.path.isfile(root_path):
+            yield root_path
+            continue
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+            for name in filenames:
+                if name.startswith(SKIP_FILE_PREFIXES):
+                    continue
+                if os.path.splitext(name)[1].lower() not in SOURCE_EXT:
+                    continue
+                yield os.path.join(dirpath, name)
+
+
+def scan(paths, severity_floor="info"):
+    findings = []
+    files = 0
+    lines = 0
+    for path in iter_files(paths):
+        base = os.path.basename(path)
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        files += 1
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if len(line) > 1000:
+                continue
+            lines += 1
+            for rid, sev, pattern, msg, fix in RULES:
+                if not severity_at_least(sev, severity_floor):
+                    continue
+                if pattern is None:
+                    continue  # advisory-only rule; see RULES
+                if pattern.search(line):
+                    findings.append({
+                        "rule": rid, "severity": sev, "file": path, "line": lineno,
+                        "message": msg, "fix": fix,
+                        "excerpt": line.strip()[:120],
+                        "subject": (
+                            any(s in base for s in SUBJECT_FILES)
+                            or base.endswith(SUBJECT_SUFFIXES)
+                            or base.startswith(SUBJECT_SUFFIXES[2])
+                        ),
+                    })
+    return findings, files, lines
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Known-weak source patterns, with fixes.")
+    ap.add_argument("paths", nargs="*", default=["."])
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--severity", default="info", choices=list(SEVERITY_ORDER))
+    args = ap.parse_args()
+
+    findings, files, lines = scan(args.paths, args.severity)
+    findings.sort(key=lambda f: (-SEVERITY_ORDER[f["severity"]], f["file"], f["line"]))
+
+    if args.json:
+        print(json.dumps({"filesScanned": files, "linesScanned": lines,
+                          "findings": findings}, indent=2))
+        return 0
+
+    print(f"codescan -- scanned {files} files, {lines} lines\n")
+    real = [f for f in findings if not f["subject"]]
+    lab = [f for f in findings if f["subject"]]
+
+    for label, group in (("FINDINGS", real), ("LAB FILES (patterns are the subject here)", lab)):
+        if not group:
+            continue
+        print(f"== {label} ==")
+        for f in group:
+            print(f"  {f['severity']:<6} {f['rule']:<20} {f['file']}:{f['line']}")
+            print(f"         {f['message']}")
+            print(f"         fix: {f['fix']}")
+            print(f"         > {f['excerpt']}")
+            print()
+
+    if not real:
+        print("no findings outside the lab fixtures")
+    counts = {}
+    for f in findings:
+        counts[f["severity"]] = counts.get(f["severity"], 0) + 1
+    if counts:
+        print("totals: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

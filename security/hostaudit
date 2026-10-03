@@ -1,0 +1,212 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# hostaudit -- check this device's own network exposure and service posture.
+#
+#   ./security/hostaudit           full report
+#   ./security/hostaudit --quiet   findings only
+#
+# SCOPE. This audits THIS PHONE. It does not scan the network. Finding open
+# ports on neighbouring hosts is other people's business and this script has no
+# business doing it; the one exception is an explicit self-check against our own
+# address, which is how we confirm a listener is actually reachable rather than
+# merely running.
+#
+# Every check is a read. Nothing is started, stopped, or changed.
+
+set -uo pipefail
+
+QUIET=0
+[[ "${1:-}" == "--quiet" ]] && QUIET=1
+
+BIN=/data/data/com.termux/files/usr/bin
+FAIL=0
+
+say()  { [[ $QUIET -eq 1 ]] || echo "$@"; }
+head2() { say ""; say "== $* =="; }
+ok()   { say "  ok    $*"; }
+warn() { say "  WARN  $*"; FAIL=$((FAIL+1)); }
+bad()  { say "  BAD   $*"; FAIL=$((FAIL+1)); }
+
+lan_ip() {
+  "$BIN/node" -e '
+    const os=require("os"), out=[];
+    for(const l of Object.values(os.networkInterfaces()))
+      for(const i of l||[]) if(i.family==="IPv4"&&!i.internal) out.push(i.address);
+    console.log(out.join(" "));
+  ' 2>/dev/null
+}
+
+IP="$(lan_ip)"
+say "hostaudit -- $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+say "device: $(getprop ro.product.model 2>/dev/null) / android $(getprop ro.build.version.release 2>/dev/null)"
+say "lan ip: ${IP:-<unavailable>}"
+
+# --- 1. listening sockets we know about ------------------------------------
+
+head2 "services this repo starts"
+if pgrep -f "$BIN/sshd" >/dev/null 2>&1; then
+  ok "sshd running"
+  BIND=$(grep -m1 '^ListenAddress' /data/data/com.termux/files/usr/etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+  PORT=$(grep -m1 '^Port' /data/data/com.termux/files/usr/etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+  say "  bind=${BIND:-unknown} port=${PORT:-unknown}"
+  if [[ "$BIND" == "127.0.0.1" || "$BIND" == "::1" ]]; then
+    ok "bound to loopback -- not reachable from the network"
+  elif [[ "$BIND" == "0.0.0.0" || "$BIND" == "::" ]]; then
+    bad "bound to ALL interfaces (${BIND}) -- reachable by every device on this network"
+    say "        fix: ./daemon/sshd-up.sh stop-lan"
+  else
+    warn "bind address is ${BIND}, which is neither loopback nor wildcard -- check it is intended"
+  fi
+
+  # Verify reachability for real rather than trusting the config file. A
+  # ListenAddress of 0.0.0.0 in a config does not prove anything is listening.
+  if [[ -n "$IP" && -n "$PORT" ]]; then
+    if "$BIN/nc" -z -w 3 "$IP" "$PORT" 2>/dev/null; then
+      bad "self-check: ${IP}:${PORT} ACCEPTS connections from the LAN address"
+    else
+      ok "self-check: ${IP}:${PORT} refuses, consistent with a loopback bind"
+    fi
+  fi
+
+  CONF=/data/data/com.termux/files/usr/etc/ssh/sshd_config
+  if grep -qE '^[[:space:]]*PasswordAuthentication[[:space:]]+yes' "$CONF" 2>/dev/null; then
+    bad "PasswordAuthentication is enabled on an sshd exposed to a network"
+  else
+    ok "password authentication disabled"
+  fi
+  if grep -qE '^[[:space:]]*PermitRootLogin[[:space:]]+yes' "$CONF" 2>/dev/null; then
+    bad "PermitRootLogin yes"
+  else
+    ok "root login not permitted"
+  fi
+else
+  say "  sshd not running"
+fi
+
+if pgrep -f "scheduler.mjs" >/dev/null 2>&1; then
+  ok "scheduler running"
+else
+  warn "scheduler not running -- no unattended jobs will fire"
+fi
+
+# --- 2. credential location ----------------------------------------------
+
+head2 "credential handling"
+if [ -f "$HOME/.secrets.env" ]; then
+  PERM=$(stat -c '%a' "$HOME/.secrets.env" 2>/dev/null || echo "?")
+  if [[ "$PERM" == "600" ]]; then
+    ok "~/.secrets.env mode 600"
+  else
+    bad "~/.secrets.env mode ${PERM}, expected 600"
+  fi
+  # The credential must not sit inside the repo: the filesystem MCP server is
+  # rooted at ~/tiny-agent, so anything there is readable by an agent job.
+  if grep -q 'sk-or-v1-' "$HOME/.secrets.env" 2>/dev/null; then
+    if [[ -n "$REPO_DIR" ]]; then :; fi
+    ok "credential present in ~/.secrets.env (outside the repo)"
+  fi
+else
+  warn "~/.secrets.env missing"
+fi
+
+for f in agent.json agent.cloud.json agent.cloud.backup.json agent.json.pre-502; do
+  P="$REPO_DIR/$f"
+  [[ -f "$P" ]] || continue
+  if grep -q 'sk-or-v1-' "$P" 2>/dev/null; then
+    bad "$f contains a live credential AND is inside the repository tree"
+  else
+    ok "$f has no apiKey"
+  fi
+done
+
+# --- 3. filesystem permissions on sensitive files -------------------------
+
+head2 "file permissions"
+for f in "$HOME/.ssh" "$HOME/.bashrc"; do
+  [[ -e "$f" ]] || continue
+  PERM=$(stat -c '%a' "$f" 2>/dev/null || echo "?")
+  case "$PERM" in
+    700|600) ok "$(basename "$f") mode ${PERM}" ;;
+    *)       warn "$(basename "$f") mode ${PERM}" ;;
+  esac
+done
+if [[ -f "$HOME/.ssh/id_ed25519_krieger" ]]; then
+  PERM=$(stat -c '%a' "$HOME/.ssh/id_ed25519_krieger" 2>/dev/null || echo "?")
+  [[ "$PERM" == "600" ]] && ok "private ssh key mode 600" || bad "private ssh key mode ${PERM}, expected 600"
+fi
+
+# --- 4. git hygiene -------------------------------------------------------
+
+head2 "git hygiene"
+cd "$REPO_DIR" 2>/dev/null || exit 0
+for f in agent.json agent.cloud.json agent.cloud.backup.json agent.json.pre-502; do
+  if git check-ignore -q "$f" 2>/dev/null; then
+    ok "$f is gitignored"
+  else
+    bad "$f is NOT gitignored"
+  fi
+done
+if [[ -d .backup ]]; then
+  # TWO separate problems, and the first version of this check only looked for
+  # the second one:
+  #
+  #   1. A trailing-slash pattern (.backup/) only matches paths BENEATH it.
+  #      `git check-ignore .backup` therefore reports NOT-ignored even when the
+  #      rule is working correctly. Testing the directory is simply the wrong
+  #      question.
+  #   2. .gitignore does not apply to files git ALREADY tracks. On 2026-10-01
+  #      this check found 15 snapshot files committed in the initial commit,
+  #      long before the ignore rule existed. Those files are in history and
+  #      no ignore rule will remove them.
+  #
+  # So: report tracked-but-ignored files as their own finding, because they are
+  # a real gap and silently ignoring them is how stale copies of old code end up
+  # shipping.
+  TRACKED=$(git ls-files .backup 2>/dev/null | wc -l | tr -d ' ')
+  SAMPLE=$(find .backup -type f 2>/dev/null | head -1)
+  if [[ -n "$SAMPLE" ]]; then
+    if git check-ignore -q "$SAMPLE" 2>/dev/null; then
+      ok "new .backup files are gitignored (verified via ${SAMPLE##*/})"
+    else
+      bad ".backup is NOT gitignored -- new snapshots could be committed"
+    fi
+  fi
+  if [[ "$TRACKED" != "0" ]]; then
+    bad "${TRACKED} file(s) under .backup are already TRACKED and unaffected by .gitignore"
+    say "        they are in git history; untrack with: git rm -r --cached .backup"
+  else
+    ok "no .backup files are tracked"
+  fi
+fi
+# Does any key appear in committed history? Cheap check: grep every blob we can.
+if git rev-list --all 2>/dev/null | head -50 | while read -r c; do
+     git grep -lI 'sk-or-v1-[A-Za-z0-9]\{40,\}' "$c" 2>/dev/null
+   done | grep -q .; then
+  bad "a live-looking key appears in committed history -- rotate it"
+else
+  ok "no live-looking key in the last 50 commits"
+fi
+
+# --- 5. exposure sanity ----------------------------------------------------
+
+head2 "exposure"
+if [[ -n "$IP" ]]; then
+  # One port, ourselves. This is the only network probe in the script and it is
+  # aimed at this device on purpose.
+  OPEN=""
+  for p in 8022 22 21 23 5555 5037; do
+    "$BIN/nc" -z -w 2 "$IP" "$p" 2>/dev/null && OPEN="$OPEN $p"
+  done
+  if [[ -n "$OPEN" ]]; then
+    warn "ports open on our own LAN address:${OPEN}"
+  else
+    ok "no unexpected listeners on the LAN address"
+  fi
+fi
+
+say ""
+if [[ $FAIL -eq 0 ]]; then
+  say "hostaudit: no findings"
+else
+  say "hostaudit: ${FAIL} finding(s)"
+fi
+exit $((FAIL > 3 ? 1 : 0))

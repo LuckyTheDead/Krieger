@@ -1,0 +1,38 @@
+{
+  "name": "tiny-agent",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Prompt-driven assistant config and MCP servers.",
+  "scripts": {
+    "test": "npm --prefix termux-mcp test && npm run test:portable",
+    "test:portable": "node --test prompt-sync.test.mjs && node --test daemon/daemon.test.mjs daemon/scheduler.test.mjs daemon/agent.test.mjs daemon/memory-summarize.test.mjs daemon/affect.test.mjs daemon/emotion.test.mjs daemon/ircbot.test.mjs && node --test security/security.test.mjs",
+    "test:android": "npm --prefix termux-mcp test",
+    "test:session": "node --test termux-mcp/session-mcp.test.js",
+    "test:prompt": "node --test prompt-sync.test.mjs",
+    "test:daemon": "node --test daemon/daemon.test.mjs",
+    "test:scheduler": "node --test daemon/scheduler.test.mjs",
+    "test:agent": "node --test daemon/agent.test.mjs",
+    "test:security": "node --test security/security.test.mjs",
+    "test:affect": "node --test daemon/affect.test.mjs",
+    "test:emotion": "node --test daemon/emotion.test.mjs",
+    "test:ircbot": "node --test daemon/ircbot.test.mjs",
+    "irc": "node daemon/ircbot.mjs networks",
+    "irc:test": "node daemon/ircbot.mjs test",
+    "emotion": "node daemon/emotion.mjs report",
+    "affect": "node daemon/affect.mjs report",
+    "sec": "./security/secsuite",
+    "sec:quick": "./security/secsuite --quick",
+    "test:memory-summary": "node --test daemon/memory-summarize.test.mjs",
+    "memory:summary": "node daemon/memory-summarize.mjs",
+    "memory:summary:apply": "node daemon/memory-summarize.mjs --apply",
+    "daemon": "node daemon/scheduler.mjs",
+    "daemon:once": "node daemon/scheduler.mjs --once",
+    "daemon:list": "node daemon/krieger.mjs list",
+    "daemon:doctor": "node daemon/krieger.mjs doctor"
+  },
+  "dependencies": {
+    "croner": "^10.0.1",
+    "@huggingface/tiny-agents": "^0.3.4"
+  }
+}
